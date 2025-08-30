@@ -6,18 +6,23 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
+      - PORT=3000
     volumes:
       - .:/app
       - /app/node_modules
     depends_on:
       - redis
+    networks:
+      - my-app-network
 
   redis:
     image: redis:alpine
     ports:
       - "6379:6379"
+    networks:
+      - my-app-network
 
 networks:
-  default:
-    name: my-app-network
+  my-app-network:
+    driver: bridge
