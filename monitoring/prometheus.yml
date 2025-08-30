@@ -1,0 +1,101 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # Prometheus 자체 모니터링
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # 메인 애플리케이션
+  - job_name: 'docker-hello-app'
+    static_configs:
+      - targets: ['app:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Node Exporter - 시스템 메트릭
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+
+  # cAdvisor - 컨테이너 메트릭
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+
+  # Docker 데몬 메트릭 (실험적)
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['host.docker.internal:9323']
+    scrape_interval: 30s
+
+  # Grafana 메트릭
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # AlertManager 메트릭
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+    scrape_interval: 30s
+
+  # HTTP 블랙박스 모니터링
+  - job_name: 'blackbox-http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - http://app:3000
+        - http://grafana:3000
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Docker 서비스 디스커버리 (선택사항)
+  - job_name: 'docker-services'
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__meta_docker_container_label_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_docker_container_label_prometheus_io_path]
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_docker_container_label_prometheus_io_port]
+        target_label: __address__
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+      - source_labels: [__meta_docker_container_name]
+        target_label: container_name
+        regex: /(.*)
+        replacement: $1
+      - source_labels: [__meta_docker_container_label_prometheus_io_job]
+        target_label: job
+        regex: (.+)
+      - source_labels: [__meta_docker_container_label_prometheus_io_instance]
+        target_label: instance
+        regex: (.+)

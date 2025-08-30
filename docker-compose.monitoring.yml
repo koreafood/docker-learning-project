@@ -1,0 +1,154 @@
+version: '3.8'
+
+services:
+  # 메인 애플리케이션
+  app:
+    build: .
+    container_name: docker-hello-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - monitoring
+    labels:
+      - "prometheus.io/scrape=true"
+      - "prometheus.io/port=3000"
+      - "prometheus.io/path=/metrics"
+
+  # Prometheus - 메트릭 수집
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - monitoring
+
+  # Grafana - 대시보드
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - monitoring
+
+  # Node Exporter - 시스템 메트릭
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - monitoring
+
+  # cAdvisor - 컨테이너 메트릭
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+    networks:
+      - monitoring
+
+  # AlertManager - 알림 관리
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager_data:/alertmanager
+    networks:
+      - monitoring
+
+  # Nginx - 리버스 프록시 및 로드 밸런서
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./monitoring/nginx.conf:/etc/nginx/nginx.conf
+      - ./monitoring/ssl:/etc/nginx/ssl
+    depends_on:
+      - app
+      - grafana
+      - prometheus
+    networks:
+      - monitoring
+
+  # Watchtower - 자동 업데이트
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_INCLUDE_STOPPED=true
+      - WATCHTOWER_REVIVE_STOPPED=true
+    networks:
+      - monitoring
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:
+
+networks:
+  monitoring:
+    driver: bridge
